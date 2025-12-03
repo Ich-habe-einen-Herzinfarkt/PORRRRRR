@@ -179,7 +179,16 @@
 
           installPhase = ''
             mkdir -p $out/bin
-            cp PORRRRRR $out/bin/
+            cp PORRRRRR $out/bin/.PORRRRRR-unwrapped
+            # Wrap the binary to filter out CUDA backend loading warnings
+            # is this stupid? yes. But for *some* reason even the rocm package seems to be trying to load cuda despite working perfectly fine without them...
+            # probably some issue in adaptivecppWithRocm, but I can't be bothered to debug it and fix it properly right now
+            cat > $out/bin/PORRRRRR <<'WRAPPER'
+#!/bin/bash
+DIR="$(dirname "$0")"
+exec "$DIR/.PORRRRRR-unwrapped" "$@" 2> >(grep -v "librt-backend-cuda.so" >&2)
+WRAPPER
+            chmod +x $out/bin/PORRRRRR
           '';
         };
       });
