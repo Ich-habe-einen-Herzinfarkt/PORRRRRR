@@ -10,3 +10,13 @@ add_executable(PORRRRRR main.cpp)
 # Add SYCL support to target
 add_sycl_to_target(TARGET PORRRRRR)
 
+# Optional: Benchmarks
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+
+if(BUILD_BENCHMARKS)
+  find_package(benchmark REQUIRED)
+  
+  add_executable(PORRRRRR_bench bench.cpp)
+  add_sycl_to_target(TARGET PORRRRRR_bench)
+  target_link_libraries(PORRRRRR_bench PRIVATE benchmark::benchmark)
+endif()
