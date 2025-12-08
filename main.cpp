@@ -27,7 +27,7 @@ constexpr int PIXELS_PER_WI = 2;
 
 int main(){
     #pragma region Image Loading
-    const char* input_path  = "input.png";
+    const char* input_path  = "input.jpg";
     const char* output_path = "output.png";
 
     int w, h, channels;
