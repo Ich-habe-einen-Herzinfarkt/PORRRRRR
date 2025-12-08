@@ -84,7 +84,7 @@ int main(){
     ImageF gray = toGray(data, w, h, channels);
     stbi_image_free(data);
 
-    // kernels - https://en.wikipedia.org/wiki/Sobel_operator
+    // kernal
     std::vector<float> sobelX = {
             -1,0,1,
             -2,0,2,
