@@ -48,6 +48,7 @@
   // --- Main Chapters ---
   include "content/Introduction.typ"
   include "content/Implementation.typ"
+  include "content/Bench.typ"
   include "content/Conclusion.typ"
 
   
