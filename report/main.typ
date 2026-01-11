@@ -52,7 +52,7 @@
 
   
   // --- Bibliography ---
-  bibliography("items.bib", style: "ieee")
+  bibliography("bibliography.bib", style: "ieee")
 
   // List of Acronyms - comment out, if not needed (no abbreviations were used).
   glossary-outline(glossary)
@@ -65,7 +65,7 @@
 
   // --- Appendices ---
   // Comment out if not needed.
-  // appendix(lang.thesis, include "content/Appendix.typ")
+  appendix("pl", include "content/Appendix.typ")
 
   if draft {
     set heading(numbering: none)
