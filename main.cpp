@@ -99,7 +99,7 @@ std::vector<uint8_t> normalizeToU8(const ImageF &img) {
 int main(int argc, char *argv[]) {
 
     // default if not specified
-    omp_set_num_threads(1);
+    omp_set_num_threads(128);
     // Usage: ./PORRRRRR [num_threads]
     if (argc > 1) {
         int requested = std::stoi(argv[1]);
@@ -123,6 +123,7 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Loaded: " << input_path << " (" << w << "x" << h
               << ", ch=" << channels << ")\n";
+    auto t_accel_start = std::chrono::high_resolution_clock::now();
 
     double t_gray_start = omp_get_wtime();
     ImageF gray = toGray(data, w, h, channels);
@@ -152,6 +153,7 @@ int main(int argc, char *argv[]) {
     double t_norm_start = omp_get_wtime();
     std::vector<uint8_t> out_u8 = normalizeToU8(mag);
     double t_norm_end = omp_get_wtime();
+    auto t_accel_end = std::chrono::high_resolution_clock::now();
 
     if (!stbi_write_png(output_path, w, h, 1, out_u8.data(), w)) {
         std::cerr << "Failed to write PNG: " << output_path << "\n";
@@ -161,13 +163,14 @@ int main(int argc, char *argv[]) {
 
     auto t_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> total = t_end - t_start;
-
+    std::chrono::duration<double> processing = t_accel_end - t_accel_start;
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "\n--- Timing (seconds) ---\n";
     std::cout << "Grayscale conversion : " << (t_gray_end - t_gray_start) << "\n";
     std::cout << "Convolution (both axes) : " << (t_conv_end - t_conv_start) << "\n";
     std::cout << "Gradient magnitude   : " << (t_mag_end - t_mag_start) << "\n";
     std::cout << "Normalisation & write: " << (t_norm_end - t_norm_start) << "\n";
+    std::cout << "Processing runtime   : " << processing.count() << "\n";
     std::cout << "Total runtime        : " << total.count() << "\n";
 
     return 0;
