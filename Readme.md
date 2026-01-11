@@ -25,3 +25,10 @@ cmake --build .
 ./PORRRRRR
 ```
 
+
+## Uruchamianie OpenMP
+Wystarczy podać ilość wątków jako argument do zbudowanego pliku .exe
+```sh
+./PORRRRRR.exe [liczba_wątków]
+```
+
