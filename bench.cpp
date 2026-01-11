@@ -3,7 +3,9 @@
 #include <vector>
 #include <cstdint>
 #include <limits>
+#include <algorithm>
 #include <sycl/sycl.hpp>
+#include <omp.h>
 
 // SYCL kernel names
 class sobel_naive_kernel;
@@ -21,6 +23,8 @@ constexpr int LOCAL_W = TILE_W + 2 * HALO;
 constexpr int LOCAL_H = TILE_H + 2 * HALO;
 
 typedef std::vector<float> ImageF;
+typedef std::vector<uint8_t> ImageU8;
+typedef std::vector<uint8_t> ImageRGB;
 
 // Helper for CPU version
 inline int idx(int x, int y, int w) { return y * w + x; }
@@ -34,6 +38,100 @@ ImageF generateTestImage(int w, int h) {
         }
     }
     return img;
+}
+
+ImageRGB generateTestImageRGB(int w, int h) {
+    ImageRGB img(static_cast<size_t>(w) * h * 3u);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            size_t idxBase = (static_cast<size_t>(y) * w + x) * 3u;
+            uint8_t val = static_cast<uint8_t>((x + y) % 256);
+            img[idxBase + 0] = val;
+            img[idxBase + 1] = static_cast<uint8_t>((val + 85) % 256);
+            img[idxBase + 2] = static_cast<uint8_t>((val + 170) % 256);
+        }
+    }
+    return img;
+}
+
+// OpenMP convolution mirroring openmp.cpp
+ImageF convolve_openmp(const ImageF& in, int w, int h, const std::vector<float>& kernel, int kw, int kh) {
+    ImageF out(w * h, 0.0f);
+    int padX = kw / 2;
+    int padY = kh / 2;
+
+#pragma omp parallel for schedule(static) default(none) shared(in, out, w, h, kernel, kw, kh, padX, padY)
+    for (int i = 0; i < w * h; ++i) {
+        int x = i % w;
+        int y = i / w;
+        float sum = 0.0f;
+        for (int ky = 0; ky < kh; ++ky) {
+            for (int kx = 0; kx < kw; ++kx) {
+                int ix = x + kx - padX;
+                int iy = y + ky - padY;
+                if (ix >= 0 && ix < w && iy >= 0 && iy < h) {
+                    sum += in[idx(ix, iy, w)] * kernel[ky * kw + kx];
+                }
+            }
+        }
+        out[i] = sum;
+    }
+    return out;
+}
+
+// OpenMP magnitude mirroring openmp.cpp
+ImageF magnitude_openmp(const ImageF& gx, const ImageF& gy, int size) {
+    ImageF mag(size);
+
+#pragma omp parallel for schedule(static) default(none) shared(gx, gy, mag, size)
+    for (int i = 0; i < size; ++i) {
+        mag[i] = std::hypot(gx[i], gy[i]);
+    }
+    return mag;
+}
+
+// OpenMP normalization mirroring openmp.cpp
+ImageU8 normalizeToU8_openmp(const ImageF& img) {
+    float mn = img[0];
+    float mx = img[0];
+
+#pragma omp parallel for reduction(min:mn) reduction(max:mx) default(none) shared(img)
+    for (size_t i = 0; i < img.size(); ++i) {
+        if (img[i] < mn) mn = img[i];
+        if (img[i] > mx) mx = img[i];
+    }
+
+    float range = mx - mn;
+    if (range < 1e-6f) range = 1.0f;
+
+    ImageU8 out(img.size());
+
+#pragma omp parallel for schedule(static) default(none) shared(img, out, mn, mx, range)
+    for (size_t i = 0; i < img.size(); ++i) {
+        float v = (img[i] - mn) / range * 255.0f;
+        int iv = static_cast<int>(std::round(v));
+        if (iv < 0) iv = 0;
+        if (iv > 255) iv = 255;
+        out[i] = static_cast<uint8_t>(iv);
+    }
+    return out;
+}
+
+// OpenMP grayscale mirroring openmp.cpp
+ImageF toGray_openmp(const ImageRGB& data, int w, int h, int channels) {
+    ImageF gray(static_cast<size_t>(w) * h);
+
+#pragma omp parallel for schedule(static) default(none) shared(data, w, h, channels, gray)
+    for (int i = 0; i < w * h; ++i) {
+        const uint8_t* p = data.data() + static_cast<size_t>(i) * channels;
+        float v;
+        if (channels == 1) v = p[0];
+        else if (channels == 3 || channels == 4)
+            v = 0.299f * p[0] + 0.587f * p[1] + 0.114f * p[2];
+        else v = 0.0f;
+        gray[static_cast<size_t>(i)] = v;
+    }
+    return gray;
 }
 
 // CPU convolution (from original implementation)
@@ -128,6 +226,76 @@ static void BM_Sobel_CPU_Unrolled(benchmark::State& state) {
     
     state.SetItemsProcessed(state.iterations() * w * h);
     state.SetBytesProcessed(state.iterations() * w * h * sizeof(float) * 2);
+}
+
+// =============================================================================
+// CPU with OpenMP (parallel unrolled Sobel)
+// =============================================================================
+static void BM_Sobel_OpenMP(benchmark::State& state) {
+    const int w = state.range(0);
+    const int h = state.range(1);
+
+    ImageF gray = generateTestImage(w, h);
+    static const std::vector<float> sobelX = {
+        -1, 0, 1,
+        -2, 0, 2,
+        -1, 0, 1
+    };
+    static const std::vector<float> sobelY = {
+        -1, -2, -1,
+         0,  0,  0,
+         1,  2,  1
+    };
+
+    for (auto _ : state) {
+        ImageF gx = convolve_openmp(gray, w, h, sobelX, 3, 3);
+        ImageF gy = convolve_openmp(gray, w, h, sobelY, 3, 3);
+        ImageF mag = magnitude_openmp(gx, gy, w * h);
+        ImageU8 out = normalizeToU8_openmp(mag);
+
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+
+    state.SetItemsProcessed(state.iterations() * w * h);
+    state.SetBytesProcessed(state.iterations() * w * h * (sizeof(float) * 2 + sizeof(uint8_t)));
+}
+
+// =============================================================================
+// FULL PIPELINE OpenMP: Grayscale + Sobel + Normalize
+// Mirrors openmp.cpp pipeline using synthetic RGB input
+// =============================================================================
+static void BM_FullPipeline_OpenMP(benchmark::State& state) {
+    const int w = state.range(0);
+    const int h = state.range(1);
+    const int channels = 3;
+
+    ImageRGB input = generateTestImageRGB(w, h);
+
+    static const std::vector<float> sobelX = {
+        -1, 0, 1,
+        -2, 0, 2,
+        -1, 0, 1
+    };
+    static const std::vector<float> sobelY = {
+        -1, -2, -1,
+         0,  0,  0,
+         1,  2,  1
+    };
+
+    for (auto _ : state) {
+        ImageF gray = toGray_openmp(input, w, h, channels);
+        ImageF gx = convolve_openmp(gray, w, h, sobelX, 3, 3);
+        ImageF gy = convolve_openmp(gray, w, h, sobelY, 3, 3);
+        ImageF mag = magnitude_openmp(gx, gy, w * h);
+        ImageU8 out = normalizeToU8_openmp(mag);
+
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+
+    state.SetItemsProcessed(state.iterations() * w * h);
+    state.SetBytesProcessed(state.iterations() * w * h * (channels + sizeof(float) * 2 + sizeof(uint8_t)));
 }
 
 // =============================================================================
@@ -623,6 +791,14 @@ BENCHMARK(BM_Sobel_CPU_Original)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_Sobel_CPU_Unrolled)
+    IMAGE_SIZES
+    ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_Sobel_OpenMP)
+    IMAGE_SIZES
+    ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_FullPipeline_OpenMP)
     IMAGE_SIZES
     ->Unit(benchmark::kMillisecond);
 

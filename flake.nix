@@ -81,6 +81,7 @@
           buildInputs = [
             pkgs.cmake
             adaptivecpp
+            pkgs.llvmPackages.openmp
           ];
 
           shellHook = ''
@@ -200,6 +201,7 @@
           buildInputs = [
             adaptivecpp
             pkgs.gbenchmark
+            pkgs.llvmPackages.openmp
           ];
 
           cmakeFlags = [
@@ -230,6 +232,7 @@
           buildInputs = [
             (pkgs.adaptivecppWithRocm or pkgs.adaptivecpp)
             pkgs.gbenchmark
+            pkgs.llvmPackages.openmp
           ];
 
           # use generic for now
@@ -264,6 +267,7 @@
             (pkgs.adaptivecppWithCuda or pkgs.adaptivecpp)
             pkgs.cudaPackages.cudatoolkit 
             pkgs.gbenchmark
+            pkgs.llvmPackages.openmp
           ];
           runtimeDependencies = [ pkgs.cudaPackages.cudatoolkit  pkgs.cudaPackages.cuda_cudart ];
 
