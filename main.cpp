@@ -100,13 +100,22 @@ int main(int argc, char** argv) {
 
     // Load image using STB library
     int width, height, channels;
-    uint8_t *data = stbi_load(input_path, &width, &height, &channels, 0);
-    if (!data) {
-        std::cerr << "Failed to load image: " << input_path << "\n";
-        MPI_Abort(MPI_COMM_WORLD, 1);
-        return 1;
+    uint8_t *data = nullptr;
+
+    if (rank == 0) {
+        data = stbi_load(input_path, &width, &height, &channels, 0);
+        if (!data) {
+            std::cerr << "Failed to load image: " << input_path << "\n";
+            MPI_Abort(MPI_COMM_WORLD, 1);
+            return 1;
+        }
+        std::cout << "Loaded: " << input_path << " (" << width << "x" << height << ", ch=" << channels << ")\n";
     }
-    std::cout << "Loaded: " << input_path << " (" << width << "x" << height << ", ch=" << channels << ")\n";
+
+    // Boradcast metadata
+    MPI_Bcast(&width, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&height, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&channels, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     // Distribute work across processes
     int rows_per_process = height / num_processes;
@@ -115,14 +124,39 @@ int main(int argc, char** argv) {
     int end_row = start_row + rows_per_process + (rank < remainder ? 1 : 0);
     int local_height = end_row - start_row;
 
-    // "Local" work part
-    std::vector<uint8_t> local_data(local_height * width * channels);
-    for (int y = start_row; y < end_row; y++) {
-        for (int x = 0; x < width * channels; x++) {
-            local_data[idx(x, y - start_row, width*channels)] = data[idx(x, y, width*channels)];
+    // Send loaded image to other processes so they don't need to load them themselves
+    std::vector<int> sendcounts;
+    std::vector<int> displs;
+
+    if (rank == 0) {
+        sendcounts.resize(num_processes);
+        displs.resize(num_processes);
+
+        int current_disp = 0;
+        for (int r = 0; r < num_processes; r++) {
+            int r_start = r * rows_per_process + std::min(r, remainder);
+            int r_end = r_start + rows_per_process + (r < remainder ? 1 : 0);
+            int r_h = r_end - r_start;
+
+            sendcounts[r] = r_h * width * channels; // Note: Bytes, not pixels!
+            displs[r] = current_disp;
+            current_disp += sendcounts[r];
         }
     }
-    stbi_image_free(data);
+
+    // Receive the image
+    std::vector<uint8_t> local_data(width * local_height * channels);
+
+    MPI_Scatterv(
+        data, sendcounts.data(), displs.data(), MPI_UNSIGNED_CHAR, // Send params
+        local_data.data(), local_height * width * channels, MPI_UNSIGNED_CHAR, // Recv params
+        0, MPI_COMM_WORLD // Root and Comm
+    );
+
+    // Free the data
+    if (rank == 0) {
+        stbi_image_free(data);
+    }
 
     // Convert to greyscale
     // (upper ghost + local rows + lower ghost) * width
@@ -158,7 +192,7 @@ int main(int argc, char** argv) {
     if (rank == 0) final_result.resize(width * height);
 
     std::vector<int> recvcounts(num_processes);
-    std::vector<int> displs(num_processes);
+    std::vector<int> displs_v2(num_processes);
     if (rank == 0) {
         int current_disp = 0;
         for (int r = 0; r < num_processes; r++) {
@@ -168,12 +202,12 @@ int main(int argc, char** argv) {
             int r_height = r_end - r_start;
 
             recvcounts[r] = r_height * width;
-            displs[r] = current_disp;
+            displs_v2[r] = current_disp;
             current_disp += recvcounts[r];
         }
     }
 
-    MPI_Gatherv(output.data(), local_height * width, MPI_FLOAT, final_result.data(), recvcounts.data(), displs.data(), MPI_FLOAT, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(output.data(), local_height * width, MPI_FLOAT, final_result.data(), recvcounts.data(), displs_v2.data(), MPI_FLOAT, 0, MPI_COMM_WORLD);
 
     // Save result
     if (rank == 0) {
