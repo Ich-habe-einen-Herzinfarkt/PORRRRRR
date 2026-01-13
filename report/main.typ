@@ -23,7 +23,7 @@
     `false`. variable to false.
 
   **/
-  let draft = true
+  let draft = false
   set-margin-note-defaults(hidden: not draft)
 
   show: simple-doc.with(
@@ -38,7 +38,7 @@
     title-font: "Adagio_Slab",
     show-toc: true,
     show-figures: true,
-    draft: true, // Set to false for final version
+    draft: draft, // Set to false for final version
     logo: align(right, image("images/Logo.png", width: 30%))
   )
 
