@@ -1,6 +1,5 @@
 #import "../utils.typ": todo, silentheading, flex-caption
 #import "@local/bytes:1.2.0": format-bytes-rate, format-items-rate
-= Pełne wyniki benchmarków <full-results>
 
 #let data = json("../benchmarks.json")
 
@@ -30,6 +29,8 @@
 #{
   set page(margin: (x: 3em))
   show figure: set block(breakable: true)
+
+  [= Pełne wyniki benchmarków <full-results>]
   figure(
     table(
       columns: 6,
@@ -42,7 +43,7 @@
       ..for (i, (mean, stddev)) in means.zip(stddevs).enumerate() {
         let sz = get-size(mean.name)
         (
-          [#(i + 1)],
+          [v#(calc.floor(i/5) + 1)],
           [#name-filter(mean.name)],
           [#sz],
           [#calc.round(mean.real_time, digits: 2) ms],

@@ -1,33 +1,42 @@
-#import "../utils.typ": todo, silentheading, flex-caption
+#import "../utils.typ": todo, silentheading, flex-caption, enable-referable-enums, referable-enum
 #import "plots.typ": all-diagram, full-diagram, best-diagram
 
 = Benchmarki <bench>
 
-W ramach gałęzi `sycl` powstał także program do testowania wydajności implementacji wykorzystując bibliotekę Benchmark od Google@google_benchmark.
+W gałęzi `main` znajduje się także program do testowania wydajności implementacji wykorzystując bibliotekę Benchmark od Google@google_benchmark.
 
 Jako platformę testową wykorzystaliśmy komputer klasy desktop z procesorem AMD Ryzen#sym.trademark 9 7900X i procesorem graficznym AMD Radeon RX 7800 XT. Testy zostały wykonane na systemie NixOS 25.11 z kernelem Linux w wersji 6.17.
 
 Testowane były wersje AdaptiveCpp (SYCL) 25.02.0, LLVM/OpenMP 21.1.7 i MPI 5.0.9 zainstalowane z repozytorium NixPkgs.
-
+#show: enable-referable-enums
 #[
-  #set enum(numbering: "(v1)")
+  #set enum(numbering: "(v1)", full: true)
+  #referable-enum("")[
   + bazowa implementacja wersji sekwencyjnej
   
   + implementacja wersji sekwencyjnej po zoptymalizowaniu wewnętrznej pętli
+
+  + zrównoleglona implementacja bazowej wersji sekwencyjnej z użyciem OpenMP
+
+  + zrównoleglona implementacja bazowej wersji sekwencyjnej z użyciem MPI
   
-  + zrównoleglona implementacja bazowej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)#footnote[Obecnie bufory nie są rekomendowane przez gorszą wydajność — kompilator nawet ostrzega przed ich użyciem]
+  + zrównoleglona implementacja bazowej wersji sekwencyjnej z użyciem `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)#footnote[Obecnie bufory nie są rekomendowane przez gorszą wydajność — kompilator nawet ostrzega przed ich użyciem]
   
-  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)
+  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej z użyciem `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)
   
-  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem USM (nowsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)
+  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej z użyciem`SYCL` z użyciem USM (nowsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)
   
-  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` i korzystająca z tilingu#footnote[Podział zadania na grupy wątków (kafelki), gdzie każda grupa najpierw ładuje swoje dane do lokalnej pamięci, czeka na synchronizację, a później wykonuje operacje na lokalnych danych]
+  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej z użyciem `SYCL` i korzystająca z tilingu#footnote[Podział zadania na grupy wątków (kafelki), gdzie każda grupa najpierw ładuje swoje dane do lokalnej pamięci, czeka na synchronizację, a później wykonuje operacje na lokalnych danych]
   
-  + zoptymalizowana zrównoleglona implementacja na USM, przetwarzająca po dwa piksele na wątek; uproszczona
+  + zoptymalizowana zrównoleglona implementacja z użyciem na USM, przetwarzająca po dwa piksele na wątek; uproszczona<final-version> 
   
-  + pełne przetwarzanie obrazu na `CPU`, wliczając przetwarzanie pikseli na skalę szarości i normalizację wyniku
+  + pełne przetwarzanie obrazu sekwencyjnie, wliczając przetwarzanie pikseli na skalę szarości i normalizację wyniku
+
+
+  + pełne przetwarzanie obrazu 
   
-  + pełne przetwarzanie obrazu na `GPU` z użyciem kernela z v7
+  + pełne przetwarzanie obrazu zrównoleglone przez `SYCL` na GPU z użyciem kernela z @final-version
+]
 ]
 
 Dla każdego wariantu wykonano benchmark dla pięciu różnych rozdzielczości obrazów:

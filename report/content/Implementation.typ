@@ -1,5 +1,6 @@
 #import "../utils.typ": todo, silentheading, flex-caption
-
+#show figure: set block(breakable: true)
+#show raw: set block(breakable: true)
 = Implementacje tematu projektu <implementacje-tematu-projektu>
 Kod źródłowy znajduje się na platformie GitHub pod linkiem: #link("https://github.com/Ich-habe-einen-Herzinfarkt/PORRRRRR")[GitHub];.
 
@@ -89,8 +90,6 @@ Konsekwentnie, możemy zauważyć bardziej znaczące różnice w konstrukcji pro
 Dodatkowo procesy w obliczeniach korzystają z wierszy obrazu, które należą do innych procesów, co skutuje potrzebą wysłania odpowiednio pierwszego i ostatniego wiersza danego fragmentu do "sąsiednich" procesów. Obsłużenie przekazywania sobie informacji między procesami powoduje kolejne opóźnienia.
 
 Choć koncepcyjnie tego typu podejście jest dość proste -- i ma zaletę względem choćby OpenMP w formie pełnej kontroli nad tym jaki proces ma dostęp do jakich danych -- możemy zauważyć, że wymaga ono znacząco więcej kodu.
-
-#todo[Jakieś jeszcze szczegóły techniczne? ~K: Done! Dopisałam jeden akapit. To nudny kod, dużo się tam nie dzieje tbh :/]
 
 #figure(
   ```cpp
