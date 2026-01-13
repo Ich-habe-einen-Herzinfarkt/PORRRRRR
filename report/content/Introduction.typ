@@ -1,9 +1,6 @@
 #import "../utils.typ": todo, silentheading, flex-caption
 
-#todo[
-	- pozbyć się kolokwializmów
- - przygotować wykres porównujący najlepsze wersje poszczególnych implementacji
-]
+
 
 = Opis projektu <opis-projektu>
 Projekt koncentruje się na zaimplementowaniu rozwiązania wybranego tematu w czterech wersjach: sekwencyjnej oraz zrównoleglonej w trzech różnych technologiach. Następnie wykonuje się porównanie czasu obliczeń dla przykładowych instancji problemu i przeprowadza analizę wyników.

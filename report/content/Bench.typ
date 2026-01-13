@@ -1,7 +1,9 @@
+#import "../utils.typ": todo, silentheading, flex-caption
+#import "plots.typ": all-diagram, full-diagram, best-diagram
 
 = Benchmarki <bench>
 
-W ramach gałęzi `sycl` powstał także skrypt do testowania wydajności implementacji wykorzystując bibliotekę Benchmark od Google@google_benchmark.
+W ramach gałęzi `sycl` powstał także program do testowania wydajności implementacji wykorzystując bibliotekę Benchmark od Google@google_benchmark.
 
 Jako platformę testową wykorzystaliśmy komputer klasy desktop z procesorem AMD Ryzen#sym.trademark 9 7900X i procesorem graficznym AMD Radeon RX 7800 XT. Testy zostały wykonane na systemie NixOS 25.11 z kernelem Linux w wersji 6.17.
 
@@ -13,13 +15,13 @@ Testowane były wersje AdaptiveCpp (SYCL) 25.02.0, LLVM/OpenMP 21.1.7 i MPI 5.0.
   
   + implementacja wersji sekwencyjnej po zoptymalizowaniu wewnętrznej pętli
   
-  + zrównoleglona implementacja bazowej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)#footnote[obecnie nie rekomendowana przez gorszą wydajność — kompilator ostrzega przed jej użyciem]
+  + zrównoleglona implementacja bazowej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)#footnote[Obecnie bufory nie są rekomendowane przez gorszą wydajność — kompilator nawet ostrzega przed ich użyciem]
   
   + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem buforów (starsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)
   
   + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` z użyciem USM (nowsza abstrakcja dzielenia pamięci między `CPU`/`GPU`)
   
-  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` i korzystająca z tilingu#footnote[podział zadania na grupy wątków \[kafelki\], gdzie każda grupa najpierw ładuje swoje dane do lokalnej pamięci, czeka na synchronizację, a później wykonuje operacje na danych]
+  + zrównoleglona implementacja zoptymalizowanej wersji sekwencyjnej: przy pomocy `SYCL` i korzystająca z tilingu#footnote[Podział zadania na grupy wątków (kafelki), gdzie każda grupa najpierw ładuje swoje dane do lokalnej pamięci, czeka na synchronizację, a później wykonuje operacje na lokalnych danych]
   
   + zoptymalizowana zrównoleglona implementacja na USM, przetwarzająca po dwa piksele na wątek; uproszczona
   
@@ -34,10 +36,15 @@ Dla każdego wariantu wykonano benchmark dla pięciu różnych rozdzielczości o
 -	$1920 times 1080$
 -	$3840 times 2160$
 -	$7680 times 4320$
-#figure(image("../images/line_graph.png"), caption: [
-	Przepustowość benchmarków dla różnych rozdzielczości obrazów
-])
 
+// #todo[Zaktualizować wykres]
+// #figure(image("../images/line_graph.png"), caption: [
+// 	Przepustowość benchmarków dla różnych rozdzielczości obrazów
+// ])
+
+
+
+#todo[Opisać też MPI i OpenMP]
 Możemy zauważyć, że w porównaniu do wersji na GPU nasza podstawowa wersja sekwencyjna działa bardzo wolno. Nawet z optymalizacją pętli remisuje tylko z jednym wariantem `GPU` — najwolniejszym testowanym (v3), korzystającym z mniej wydajnej abstrakcji pamięci i pierwotnej implementacji Sobela. Tę przewagę widać jedynie przy najmniejszym testowanym rozmiarze obrazów, gdzie wpływ kosztów stałych implementacji na `GPU` jest większy.
 
 Dlaczego implementacja na procesorze graficznym może osiągać tak znacząco lepsze wyniki? Jest to konsekwencja adekwatności programu do alternatywnej, znacznie bardziej równoległej architektury `GPU`.
@@ -52,6 +59,9 @@ Wykorzystywany tu `SYCL` zapewnia dwie abstrakcje mające to ułatwić: bufory, 
 
 Kolejnym aspektem wpływającym na wydajność jest projekt podziału algorytmu na wiele kerneli. Istotne jest dobranie odpowiedniego rozmiaru grup (powinny wykorzystywać wielokrotności rozmiaru warp/wavefront) i właściwe zarządzanie pamięcią w ramach grupy. Częstym podejściem do optymalizacji programów na `GPU` jest podział problemów na kafelki rdzeni z wydzieloną dla kafelka pamięcią współdzieloną, co pozwala grupować dostępy do pamięci. Zastosowane tu podejście do kafelkowania okazało się mało skuteczne, osiągając gorszą wydajność niż prostsze metody optymalizacji, nawet pomimo wielu prób. Prawdopodobnie możliwe byłoby zaprojektowanie lepszego kafelkowania, ale używane kafelki były zbyt małe, by zysk z przyspieszenia przeważył koszty synchronizacji pamięci między elementami kafelka.
 
+#todo[
+  przygotować wykres porównujący najlepsze wersje poszczególnych implementacji
+]
 Ostatecznie najlepsze wyniki osiągnęła wersja realizująca nieco więcej w ramach pojedynczego wątku — obliczając dwa piksele naraz (zwiększenie do czterech na wykorzystywanej karcie prowadziło do spadku wydajności) i tworząca grupy będące wielokrotnością rozmiaru wavefrontu. Osiągnięte w ten sposób ponad 589GiB/s w najlepszym wypadku znacząco zbliża się do przepustowości pamięci w używanej karcie (624GiB/s).
 
 Takie prędkości dotyczą jedynie rdzenia Sobela. Dodając pozostałe etapy przetwarzania — transformację na skalę szarości i końcową normalizację wyników do zapisu — wydajność spada, pozostając jednak na poziomie ponad 300 razy wyższym niż oryginalna implementacja sekwencyjna.
