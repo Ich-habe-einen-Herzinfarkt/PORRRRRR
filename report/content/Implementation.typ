@@ -4,9 +4,9 @@
 = Implementacje tematu projektu <implementacje-tematu-projektu>
 Kod źródłowy znajduje się na platformie GitHub pod linkiem: #link("https://github.com/Ich-habe-einen-Herzinfarkt/PORRRRRR")[GitHub];.
 
-Implementacje rozdzielone są na wiele niezależnych od siebie gałęzi. Implementacja wersji sekwencyjnej znajduje się na gałęzi `main`, a implementacje zrównoleglone znajdują się na odpowiednio nazwanych gałęziach: `SYCL` dla GPU (przez framework SYCL), `OpenMP` i `MPI`. Implementacje działają niezależnie od siebie, więc w celu ich uruchomienia należy sklonować odpowiednią gałąź i postępować zgodnie z `README.md` dla wybranej implementacji.
+Implementacje rozdzielone są na wiele niezależnych od siebie gałęzi#footnote[Dodatkowo na gałęzi `report` znajduje się źródło tego raportu]. Implementacja wersji sekwencyjnej znajduje się na gałęzi `main`, a implementacje zrównoleglone znajdują się na odpowiednio nazwanych gałęziach: `SYCL` dla GPU (przez framework SYCL), `OpenMP` i `MPI`. Implementacje działają niezależnie od siebie, więc w celu ich uruchomienia należy sklonować odpowiednią gałąź i postępować zgodnie z `README.md` dla wybranej implementacji.
 
-Poza tym na branchu `SYCL` znajduje się kod benchmarku, który wykonuje testy dla sumarycznie dziewięciu wariancji implementacji na CPU i GPU.
+Poza tym na branchu `main` znajduje się kod benchmarku, który wykonuje testy dla sumarycznie 13 wersji implementacji na CPU i GPU.
 
 == Wersja sekwencyjna <wersja-sekwencyjna>
 Wersja sekwencyjna została zaimplementowana w języku `C++`. Cały kod znajduje się w pliku `main.cpp`.

@@ -113,11 +113,11 @@
 
 #let all-diagram = figure(
   lq.diagram(
-    cycle: lq.color.map.petroff10 + (rgb(25,25,25), rgb(200,200,200), rgb(255,211,0)),
+    cycle: lq.color.map.petroff10 + (rgb(25,25,25),rgb(255,211,0),  rgb(0,50,120), ),
     width: 100%,
     height: 10cm,
     xlabel: [Rozmiar obrazu (piksele)],
-    ylabel: [Przepustowość (GiB/s)],
+    ylabel: [Przepustowość (GiB/s), logarytmiczna],
     xscale: "log",
     yscale: "log",
     ylim: (0.1, auto),
@@ -180,13 +180,16 @@
     width: 100%,
     height: 10cm,
     xlabel: [Rozmiar obrazu (piksele)],
-    ylabel: [Przepustowość (GiB/s)],
+    ylabel: [Przepustowość (GiB/s), logarytmiczna],
     yscale: "log",
     xscale: "log",
     ylim: (0.1, auto),
     xaxis: (
       ticks: fp-sizes.map(sz => (sz, size-label(sz))),
       subticks: none,
+    ),
+    yaxis: (
+      tick-args: (density: 200%)
     ),
     legend: (position: right + top),
     ..plot2-series.map(s => lq.plot(
@@ -199,6 +202,33 @@
   caption: [Pełny pipeline przetwarzania obrazu],
 )
 
+#let plot3-series = plot2-series.filter(t => t.cat != "GPU")
+#let full-diagram-no-gpu = figure(
+  lq.diagram(
+    width: 100%,
+    height: 10cm,
+    xlabel: [Rozmiar obrazu (piksele)],
+    ylabel: [Przepustowość (GiB/s)],
+    // yscale: "log",
+    xscale: "log",
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: fp-sizes.map(sz => (sz, size-label(sz))),
+      subticks: none,
+    ),
+    yaxis: (
+      tick-args: (density: 100%)
+    ),
+    legend: (position: right + top),
+    ..plot3-series.map(s => lq.plot(
+      fp-sizes,
+      s.y,
+      mark: "s",
+      label: [v#s.version (#s.cat)]
+    ))
+  ),
+  caption: [Pełny pipeline przetwarzania obrazu (bez GPU)],
+)
 // === Plot 3: Best at 7680x4320 ===
 #let max-pixels = 7680 * 4320
 #let big-results = all-by-size.filter(d => d.pixels == max-pixels)
@@ -223,7 +253,7 @@
     width: 100%,
     height: 6cm,
     xlabel: [Implementacja],
-    ylabel: [Throughput (GiB/s)],
+    ylabel: [Przepustowość (GiB/s, logarytmiczna)],
     yscale: "log",
     
     ylim: (0.1, auto),
@@ -238,5 +268,5 @@
       base: 0.01,
     )
   ),
-  caption: [Najlepsze wyniki dla obrazu $7680 times 4320$ pikselu],
+  caption: [Najlepsze wyniki dla obrazu $7680 times 4320$ pikseli],
 )

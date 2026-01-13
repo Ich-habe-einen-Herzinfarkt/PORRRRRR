@@ -10,19 +10,12 @@
 #let stddevs = data.benchmarks.filter(is-stddev)
 
 #let get-size(name) = {
-  if str.find(name, "640/480") != none { $640 times 480$ }
-  else if str.find(name, "1280/720") != none { $1280 times 720$ }
-  else if str.find(name, "1920/1080") != none { $1920 times 1080$ }
-  else if str.find(name, "3840/2160") != none { $3840 times 2160$ }
-  else if str.find(name, "7680/4320") != none { $7680 times 4320$ }
-  else { 0.0 }
-}
-
-#let fmt-si(n) = {
-  if n >= 1e9 { str(calc.round(n / 1e9, digits: 2)) + " Gi/s" }
-  else if n >= 1e6 { str(calc.round(n / 1e6, digits: 2)) + " Mi/s" }
-  else if n >= 1e3 { str(calc.round(n / 1e3, digits: 2)) + " ki/s" }
-  else { str(calc.round(n)) + " /s" }
+  if str.find(name, "640/480") != none { $640 &times 480$ }
+  else if str.find(name, "1280/720") != none { $1280 &times 720$ }
+  else if str.find(name, "1920/1080") != none { $1920 &times 1080$ }
+  else if str.find(name, "3840/2160") != none { $3840 &times 2160$ }
+  else if str.find(name, "7680/4320") != none { $7680 &times 4320$ }
+  else { "brak" }
 }
 
 #let name-filter(n) = n.replace("BM_", "").split("/").at(0)
@@ -34,11 +27,11 @@
   figure(
     table(
       columns: 6,
-      align: (center, left, right, right, right, right),
+      align: (center, left, center, right, right, right),
       table.header(
-        [*ID*], [*Name*], [*Image Size*], [*Time*],
-        [*Throughput (B/s)*],
-        [*Throughput (items/s)*],
+        [*ID*], [*Nazwa*], [*Rozmiar*], [*Czas*],
+        [*Przepustowość (B/s)*],
+        [*Przepustowość (items/s)*],
       ),
       ..for (i, (mean, stddev)) in means.zip(stddevs).enumerate() {
         let sz = get-size(mean.name)
