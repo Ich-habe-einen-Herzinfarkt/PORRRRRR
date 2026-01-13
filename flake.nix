@@ -202,6 +202,7 @@
             adaptivecpp
             pkgs.gbenchmark
             pkgs.llvmPackages.openmp
+            pkgs.mpi
           ];
 
           cmakeFlags = [
@@ -214,6 +215,13 @@
             mkdir -p $out/bin
             cp PORRRRRR $out/bin/
             cp PORRRRRR_bench $out/bin/
+            
+            # Create mpiexec wrapper for easy MPI execution
+            cat > $out/bin/PORRRRRR_bench_mpi << 'EOF'
+#!/usr/bin/env bash
+exec ${pkgs.mpi}/bin/mpiexec "$(dirname "$0")/PORRRRRR_bench" "$@"
+EOF
+            chmod +x $out/bin/PORRRRRR_bench_mpi
           '';
         };
 
@@ -233,6 +241,7 @@
             (pkgs.adaptivecppWithRocm or pkgs.adaptivecpp)
             pkgs.gbenchmark
             pkgs.llvmPackages.openmp
+            pkgs.mpi
           ];
 
           # use generic for now
@@ -248,6 +257,13 @@
             mkdir -p $out/bin
             cp PORRRRRR $out/bin/
             cp PORRRRRR_bench $out/bin/
+            
+            # Create mpiexec wrapper for easy MPI execution
+            cat > $out/bin/PORRRRRR_bench_mpi << 'EOF'
+#!/usr/bin/env bash
+exec ${pkgs.mpi}/bin/mpiexec "$(dirname "$0")/PORRRRRR_bench" "$@"
+EOF
+            chmod +x $out/bin/PORRRRRR_bench_mpi
           '';
         };
 
@@ -268,6 +284,7 @@
             pkgs.cudaPackages.cudatoolkit 
             pkgs.gbenchmark
             pkgs.llvmPackages.openmp
+            pkgs.mpi
           ];
           runtimeDependencies = [ pkgs.cudaPackages.cudatoolkit  pkgs.cudaPackages.cuda_cudart ];
 
@@ -284,6 +301,13 @@
             mkdir -p $out/bin
             cp PORRRRRR $out/bin/
             cp PORRRRRR_bench $out/bin/
+            
+            # Create mpiexec wrapper for easy MPI execution
+            cat > $out/bin/PORRRRRR_bench_mpi << 'EOF'
+#!/usr/bin/env bash
+exec ${pkgs.mpi}/bin/mpiexec "$(dirname "$0")/PORRRRRR_bench" "$@"
+EOF
+            chmod +x $out/bin/PORRRRRR_bench_mpi
           '';
         };
 
@@ -308,13 +332,25 @@
           type = "app";
           program = "${self.packages.${system}.bench}/bin/PORRRRRR_bench";
         };
+        apps.bench-mpi = {
+          type = "app";
+          program = "${self.packages.${system}.bench}/bin/PORRRRRR_bench_mpi";
+        };
         apps.bench-rocm = {
           type = "app";
           program = "${self.packages.${system}.bench-rocm}/bin/PORRRRRR_bench";
         };
+        apps.bench-rocm-mpi = {
+          type = "app";
+          program = "${self.packages.${system}.bench-rocm}/bin/PORRRRRR_bench_mpi";
+        };
         apps.bench-cuda = {
           type = "app";
           program = "${self.packages.${system}.bench-cuda}/bin/PORRRRRR_bench";
+        };
+        apps.bench-cuda-mpi = {
+          type = "app";
+          program = "${self.packages.${system}.bench-cuda}/bin/PORRRRRR_bench_mpi";
         };
       });
 }

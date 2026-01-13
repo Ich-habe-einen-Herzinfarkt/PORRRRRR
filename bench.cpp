@@ -4,8 +4,11 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
+#include <chrono>
 #include <sycl/sycl.hpp>
 #include <omp.h>
+#include <mpi.h>
+#include <cstring>
 
 // SYCL kernel names
 class sobel_naive_kernel;
@@ -132,6 +135,79 @@ ImageF toGray_openmp(const ImageRGB& data, int w, int h, int channels) {
         gray[static_cast<size_t>(i)] = v;
     }
     return gray;
+}
+
+// =============================================================================
+// MPI Helper Functions (mirroring mpi.cpp)
+// =============================================================================
+
+// Convert to grayscale with ghost row offset (for MPI version)
+int convert_to_greyscale_mpi(const uint8_t *data, int width, int height, int channels, ImageF& greydata) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int local_id = idx(x, y, width);
+            int grey_id = width + local_id; // extra row for ghost row
+
+            if (channels == 1) {
+                greydata[grey_id] = static_cast<float>(data[local_id]);
+            }
+            else if (channels == 3 || channels == 4) {
+                int r = data[local_id * channels];
+                int g = data[local_id * channels + 1];
+                int b = data[local_id * channels + 2];
+                greydata[grey_id] = static_cast<float>(0.299 * r + 0.587 * g + 0.114 * b);
+            }
+            else {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+void apply_sobel_operator_mpi(const ImageF& input, ImageF& output, int width, int height) {
+    float sobel_x[3][3] = {{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
+    float sobel_y[3][3] = {{-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            float gx = 0, gy = 0;
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    if (x+j >= 0 && x+j < width) {
+                        gx += input[idx(x+j, y+1+i, width)] * sobel_x[i+1][j+1];
+                        gy += input[idx(x+j, y+1+i, width)] * sobel_y[i+1][j+1];
+                    }
+                }
+            }
+            float magnitude = std::hypot(gx, gy);
+            output[idx(x,y,width)] = magnitude;
+        }
+    }
+}
+
+ImageU8 normalize_image_mpi(const ImageF& input) {
+    ImageU8 output(input.size());
+
+    float max_val = input[0];
+    float min_val = input[0];
+    for (float x : input) {
+        if (x > max_val) { max_val = x; }
+        if (x < min_val) { min_val = x; }
+    }
+
+    float range = max_val - min_val;
+    if (range < 1e-6f) range = 1.0f;
+
+    for (size_t i = 0; i < input.size(); i++) {
+        float normal_x = (input[i] - min_val) / range * 255.0f;
+        int i_normal_x = static_cast<int>(std::round(normal_x));
+        if (i_normal_x < 0) i_normal_x = 0;
+        if (i_normal_x > 255) i_normal_x = 255;
+        output[i] = static_cast<uint8_t>(i_normal_x);
+    }
+
+    return output;
 }
 
 // CPU convolution (from original implementation)
@@ -645,6 +721,71 @@ static void BM_Sobel_Optimized_Combo(benchmark::State& state) {
 }
 
 // =============================================================================
+// FULL PIPELINE CPU: Grayscale + Sobel + MinMax + Normalize (CPU baseline)
+// Uses the original CPU implementation for comparison
+// =============================================================================
+static void BM_FullPipeline_CPU(benchmark::State& state) {
+    const int w = state.range(0);
+    const int h = state.range(1);
+    const size_t numPixels = static_cast<size_t>(w) * h;
+    const int channels = 3;
+    
+    // Initialize input
+    std::vector<uint8_t> inputData(numPixels * channels);
+    for (size_t i = 0; i < numPixels * channels; ++i) {
+        inputData[i] = static_cast<uint8_t>(i % 256);
+    }
+    
+    ImageF gray(numPixels);
+    ImageF mag(numPixels);
+    std::vector<uint8_t> output(numPixels);
+    
+    static const std::vector<float> sobelX = {-1,0,1, -2,0,2, -1,0,1};
+    static const std::vector<float> sobelY = {-1,-2,-1, 0,0,0, 1,2,1};
+    
+    for (auto _ : state) {
+        // Grayscale conversion
+        for (size_t i = 0; i < numPixels; ++i) {
+            const uint8_t* p = inputData.data() + i * 3;
+            gray[i] = 0.299f * p[0] + 0.587f * p[1] + 0.114f * p[2];
+        }
+        
+        // Sobel (using convolution)
+        ImageF gx = convolve_cpu(gray, w, h, sobelX, 3, 3);
+        ImageF gy = convolve_cpu(gray, w, h, sobelY, 3, 3);
+        
+        for (size_t i = 0; i < numPixels; ++i) {
+            mag[i] = std::hypot(gx[i], gy[i]);
+        }
+        
+        // MinMax
+        float minVal = std::numeric_limits<float>::max();
+        float maxVal = std::numeric_limits<float>::lowest();
+        for (size_t i = 0; i < numPixels; ++i) {
+            minVal = std::min(minVal, mag[i]);
+            maxVal = std::max(maxVal, mag[i]);
+        }
+        
+        // Normalize
+        float range = maxVal - minVal;
+        if (range < 1e-6f) range = 1.0f;
+        
+        for (size_t i = 0; i < numPixels; ++i) {
+            float v = (mag[i] - minVal) / range * 255.0f;
+            int iv = static_cast<int>(std::round(v));
+            iv = std::clamp(iv, 0, 255);
+            output[i] = static_cast<uint8_t>(iv);
+        }
+        
+        benchmark::DoNotOptimize(output.data());
+        benchmark::ClobberMemory();
+    }
+    
+    state.SetItemsProcessed(state.iterations() * w * h);
+    state.SetBytesProcessed(state.iterations() * w * h * (channels + sizeof(float) * 2 + 1));
+}
+
+// =============================================================================
 // FULL PIPELINE: Grayscale + Sobel + MinMax + Normalize (simulates real usage)
 // Uses the optimized combo approach: 128x1 WG + 2 pixels/item + fast math
 // =============================================================================
@@ -826,9 +967,292 @@ BENCHMARK(BM_Sobel_Optimized_Combo)
     IMAGE_SIZES
     ->Unit(benchmark::kMillisecond);
 
-// Full pipeline (realistic end-to-end usage)
+// Full pipeline - CPU baseline (single-threaded)
+BENCHMARK(BM_FullPipeline_CPU)
+    IMAGE_SIZES
+    ->Unit(benchmark::kMillisecond);
+
+// Full pipeline - GPU optimized (realistic end-to-end usage)
 BENCHMARK(BM_FullPipeline)
     IMAGE_SIZES
     ->Unit(benchmark::kMillisecond);
 
-BENCHMARK_MAIN();
+// =============================================================================
+// MPI Sobel Benchmark (run under mpiexec)
+// Uses manual timing with MPI_Allreduce to get max time across ranks
+// =============================================================================
+static void BM_Sobel_MPI(benchmark::State& state) {
+    const int w = state.range(0);
+    const int h = state.range(1);
+
+    int rank, num_processes;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
+
+    // Generate test image on rank 0
+    ImageF gray;
+    if (rank == 0) {
+        gray = generateTestImage(w, h);
+    }
+
+    // Calculate distribution
+    int rows_per_process = h / num_processes;
+    int remainder = h % num_processes;
+    int start_row = rank * rows_per_process + std::min(rank, remainder);
+    int end_row = start_row + rows_per_process + (rank < remainder ? 1 : 0);
+    int local_height = end_row - start_row;
+
+    // Prepare scatter/gather parameters on rank 0
+    std::vector<int> sendcounts(num_processes);
+    std::vector<int> displs(num_processes);
+    if (rank == 0) {
+        int current_disp = 0;
+        for (int r = 0; r < num_processes; r++) {
+            int r_start = r * rows_per_process + std::min(r, remainder);
+            int r_end = r_start + rows_per_process + (r < remainder ? 1 : 0);
+            int r_h = r_end - r_start;
+            sendcounts[r] = r_h * w;
+            displs[r] = current_disp;
+            current_disp += sendcounts[r];
+        }
+    }
+
+    ImageF local_gray(local_height * w);
+    ImageF greydata((local_height + 2) * w, 0.0f);
+    ImageF output(local_height * w);
+    ImageF final_result;
+    if (rank == 0) {
+        final_result.resize(w * h);
+    }
+
+    for (auto _ : state) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        // Scatter grayscale data
+        MPI_Scatterv(rank == 0 ? gray.data() : nullptr, 
+                     sendcounts.data(), displs.data(), MPI_FLOAT,
+                     local_gray.data(), local_height * w, MPI_FLOAT,
+                     0, MPI_COMM_WORLD);
+
+        // Copy to greydata with ghost row offset
+        std::memcpy(&greydata[w], local_gray.data(), local_height * w * sizeof(float));
+
+        // Exchange ghost rows
+        MPI_Request requests[4];
+        for(int i = 0; i < 4; i++) requests[i] = MPI_REQUEST_NULL;
+
+        if (rank > 0) {
+            MPI_Isend(&greydata[w], w, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &requests[0]);
+            MPI_Irecv(&greydata[0], w, MPI_FLOAT, rank - 1, 1, MPI_COMM_WORLD, &requests[1]);
+        }
+        if (rank < num_processes - 1) {
+            MPI_Isend(&greydata[local_height * w], w, MPI_FLOAT, rank + 1, 1, MPI_COMM_WORLD, &requests[2]);
+            MPI_Irecv(&greydata[(local_height+1) * w], w, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &requests[3]);
+        }
+        MPI_Waitall(4, requests, MPI_STATUSES_IGNORE);
+
+        // Apply Sobel
+        apply_sobel_operator_mpi(greydata, output, w, local_height);
+
+        // Gather results
+        MPI_Gatherv(output.data(), local_height * w, MPI_FLOAT,
+                    rank == 0 ? final_result.data() : nullptr, 
+                    sendcounts.data(), displs.data(), MPI_FLOAT,
+                    0, MPI_COMM_WORLD);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double local_sec = std::chrono::duration<double>(t1 - t0).count();
+
+        double max_sec = 0.0;
+        MPI_Allreduce(&local_sec, &max_sec, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        state.SetIterationTime(max_sec);
+
+        if (rank == 0) {
+            benchmark::DoNotOptimize(final_result.data());
+        }
+        benchmark::ClobberMemory();
+    }
+
+    state.SetItemsProcessed(state.iterations() * w * h);
+    state.SetBytesProcessed(state.iterations() * w * h * sizeof(float) * 2);
+}
+
+// =============================================================================
+// MPI Full Pipeline Benchmark (run under mpiexec)
+// Uses manual timing with MPI_Allreduce to get max time across ranks
+// =============================================================================
+static void BM_FullPipeline_MPI(benchmark::State& state) {
+    const int w = state.range(0);
+    const int h = state.range(1);
+    const int channels = 3;
+
+    int rank, num_processes;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_processes);
+
+    // Generate test image on rank 0
+    ImageRGB input;
+    if (rank == 0) {
+        input = generateTestImageRGB(w, h);
+    }
+
+    // Calculate distribution
+    int rows_per_process = h / num_processes;
+    int remainder = h % num_processes;
+    int start_row = rank * rows_per_process + std::min(rank, remainder);
+    int end_row = start_row + rows_per_process + (rank < remainder ? 1 : 0);
+    int local_height = end_row - start_row;
+
+    // Prepare scatter/gather parameters on rank 0
+    std::vector<int> sendcounts_rgb(num_processes);
+    std::vector<int> displs_rgb(num_processes);
+    std::vector<int> counts_float(num_processes);
+    std::vector<int> displs_float(num_processes);
+    if (rank == 0) {
+        int current_disp_rgb = 0;
+        int current_disp_float = 0;
+        for (int r = 0; r < num_processes; r++) {
+            int r_start = r * rows_per_process + std::min(r, remainder);
+            int r_end = r_start + rows_per_process + (r < remainder ? 1 : 0);
+            int r_h = r_end - r_start;
+            sendcounts_rgb[r] = r_h * w * channels;
+            displs_rgb[r] = current_disp_rgb;
+            counts_float[r] = r_h * w;
+            displs_float[r] = current_disp_float;
+            current_disp_rgb += sendcounts_rgb[r];
+            current_disp_float += counts_float[r];
+        }
+    }
+
+    std::vector<uint8_t> local_data(w * local_height * channels);
+    ImageF greydata((local_height + 2) * w, 0.0f);
+    ImageF output(local_height * w);
+    ImageF final_mag;
+    ImageU8 final_output;
+    if (rank == 0) {
+        final_mag.resize(w * h);
+        final_output.resize(w * h);
+    }
+
+    for (auto _ : state) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        // Scatter RGB data
+        MPI_Scatterv(rank == 0 ? input.data() : nullptr,
+                     sendcounts_rgb.data(), displs_rgb.data(), MPI_UNSIGNED_CHAR,
+                     local_data.data(), local_height * w * channels, MPI_UNSIGNED_CHAR,
+                     0, MPI_COMM_WORLD);
+
+        // Convert to grayscale
+        convert_to_greyscale_mpi(local_data.data(), w, local_height, channels, greydata);
+
+        // Exchange ghost rows
+        MPI_Request requests[4];
+        for(int i = 0; i < 4; i++) requests[i] = MPI_REQUEST_NULL;
+
+        if (rank > 0) {
+            MPI_Isend(&greydata[w], w, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &requests[0]);
+            MPI_Irecv(&greydata[0], w, MPI_FLOAT, rank - 1, 1, MPI_COMM_WORLD, &requests[1]);
+        }
+        if (rank < num_processes - 1) {
+            MPI_Isend(&greydata[local_height * w], w, MPI_FLOAT, rank + 1, 1, MPI_COMM_WORLD, &requests[2]);
+            MPI_Irecv(&greydata[(local_height+1) * w], w, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &requests[3]);
+        }
+        MPI_Waitall(4, requests, MPI_STATUSES_IGNORE);
+
+        // Apply Sobel
+        apply_sobel_operator_mpi(greydata, output, w, local_height);
+
+        // Gather magnitude results
+        MPI_Gatherv(output.data(), local_height * w, MPI_FLOAT,
+                    rank == 0 ? final_mag.data() : nullptr,
+                    counts_float.data(), displs_float.data(), MPI_FLOAT,
+                    0, MPI_COMM_WORLD);
+
+        // Normalize on rank 0
+        if (rank == 0) {
+            final_output = normalize_image_mpi(final_mag);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double local_sec = std::chrono::duration<double>(t1 - t0).count();
+
+        double max_sec = 0.0;
+        MPI_Allreduce(&local_sec, &max_sec, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        state.SetIterationTime(max_sec);
+
+        if (rank == 0) {
+            benchmark::DoNotOptimize(final_output.data());
+        }
+        benchmark::ClobberMemory();
+    }
+
+    state.SetItemsProcessed(state.iterations() * w * h);
+    state.SetBytesProcessed(state.iterations() * w * h * (channels + sizeof(float) * 2 + sizeof(uint8_t)));
+}
+
+// MPI benchmarks (use UseManualTime for proper timing across ranks)
+BENCHMARK(BM_Sobel_MPI)
+    IMAGE_SIZES
+    ->Unit(benchmark::kMillisecond)
+    ->UseManualTime();
+
+BENCHMARK(BM_FullPipeline_MPI)
+    IMAGE_SIZES
+    ->Unit(benchmark::kMillisecond)
+    ->UseManualTime();
+
+// =============================================================================
+// Null reporter to silence non-root MPI ranks
+// =============================================================================
+struct NullReporter : benchmark::BenchmarkReporter {
+    bool ReportContext(const Context&) override { return true; }
+    void ReportRuns(const std::vector<Run>&) override {}
+    void Finalize() override {}
+};
+
+// =============================================================================
+// Main entry point with MPI initialization
+// Run with: mpiexec -n 4 ./PORRRRRR_bench
+// Non-root ranks will only execute MPI benchmarks; root executes all
+// Or run without mpiexec for single-rank execution of all benchmarks
+// =============================================================================
+int main(int argc, char** argv) {
+    int provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    ::benchmark::Initialize(&argc, argv);
+
+    if (rank == 0) {
+        // Root rank runs all benchmarks with normal reporter
+        ::benchmark::RunSpecifiedBenchmarks();
+    } else {
+        // Non-root ranks only run MPI benchmarks (use null reporter)
+        // Add filter to only run benchmarks with "MPI" in the name
+        const char* mpi_filter = "MPI";
+        
+        // Check if user already specified a filter
+        std::string existing_filter = ::benchmark::GetBenchmarkFilter();
+        if (!existing_filter.empty() && existing_filter != "all") {
+            // Combine user filter with MPI requirement
+            // Only run if name matches both user filter AND contains "MPI"
+            ::benchmark::SetBenchmarkFilter(existing_filter);
+        } else {
+            ::benchmark::SetBenchmarkFilter(mpi_filter);
+        }
+        
+        NullReporter nullReporter;
+        ::benchmark::RunSpecifiedBenchmarks(&nullReporter);
+    }
+
+    ::benchmark::Shutdown();
+    MPI_Finalize();
+    return 0;
+}
