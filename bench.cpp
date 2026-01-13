@@ -308,6 +308,7 @@ static void BM_Sobel_CPU_Unrolled(benchmark::State& state) {
 // CPU with OpenMP (parallel unrolled Sobel)
 // =============================================================================
 static void BM_Sobel_OpenMP(benchmark::State& state) {
+    omp_set_num_threads(12);
     const int w = state.range(0);
     const int h = state.range(1);
 
@@ -342,6 +343,7 @@ static void BM_Sobel_OpenMP(benchmark::State& state) {
 // Mirrors openmp.cpp pipeline using synthetic RGB input
 // =============================================================================
 static void BM_FullPipeline_OpenMP(benchmark::State& state) {
+    omp_set_num_threads(12);
     const int w = state.range(0);
     const int h = state.range(1);
     const int channels = 3;
@@ -1222,9 +1224,10 @@ struct NullReporter : benchmark::BenchmarkReporter {
 // Or run without mpiexec for single-rank execution of all benchmarks
 // =============================================================================
 int main(int argc, char** argv) {
+    omp_set_num_threads(12);
     int provided;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
-
+    
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
