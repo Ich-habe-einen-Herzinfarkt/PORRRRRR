@@ -51,7 +51,7 @@ Dla każdego wariantu wykonano benchmark dla pięciu różnych rozdzielczości o
 // 	Przepustowość benchmarków dla różnych rozdzielczości obrazów
 // ])
 
-
+#all-diagram
 
 #todo[Opisać też MPI i OpenMP]
 Możemy zauważyć, że w porównaniu do wersji na GPU nasza podstawowa wersja sekwencyjna działa bardzo wolno. Nawet z optymalizacją pętli remisuje tylko z jednym wariantem `GPU` — najwolniejszym testowanym (v3), korzystającym z mniej wydajnej abstrakcji pamięci i pierwotnej implementacji Sobela. Tę przewagę widać jedynie przy najmniejszym testowanym rozmiarze obrazów, gdzie wpływ kosztów stałych implementacji na `GPU` jest większy.
@@ -68,9 +68,13 @@ Wykorzystywany tu `SYCL` zapewnia dwie abstrakcje mające to ułatwić: bufory, 
 
 Kolejnym aspektem wpływającym na wydajność jest projekt podziału algorytmu na wiele kerneli. Istotne jest dobranie odpowiedniego rozmiaru grup (powinny wykorzystywać wielokrotności rozmiaru warp/wavefront) i właściwe zarządzanie pamięcią w ramach grupy. Częstym podejściem do optymalizacji programów na `GPU` jest podział problemów na kafelki rdzeni z wydzieloną dla kafelka pamięcią współdzieloną, co pozwala grupować dostępy do pamięci. Zastosowane tu podejście do kafelkowania okazało się mało skuteczne, osiągając gorszą wydajność niż prostsze metody optymalizacji, nawet pomimo wielu prób. Prawdopodobnie możliwe byłoby zaprojektowanie lepszego kafelkowania, ale używane kafelki były zbyt małe, by zysk z przyspieszenia przeważył koszty synchronizacji pamięci między elementami kafelka.
 
+#best-diagram
+
 #todo[
   przygotować wykres porównujący najlepsze wersje poszczególnych implementacji
 ]
 Ostatecznie najlepsze wyniki osiągnęła wersja realizująca nieco więcej w ramach pojedynczego wątku — obliczając dwa piksele naraz (zwiększenie do czterech na wykorzystywanej karcie prowadziło do spadku wydajności) i tworząca grupy będące wielokrotnością rozmiaru wavefrontu. Osiągnięte w ten sposób ponad 589GiB/s w najlepszym wypadku znacząco zbliża się do przepustowości pamięci w używanej karcie (624GiB/s).
 
 Takie prędkości dotyczą jedynie rdzenia Sobela. Dodając pozostałe etapy przetwarzania — transformację na skalę szarości i końcową normalizację wyników do zapisu — wydajność spada, pozostając jednak na poziomie ponad 300 razy wyższym niż oryginalna implementacja sekwencyjna.
+
+#full-diagram

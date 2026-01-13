@@ -36,124 +36,167 @@
   else { "GPU" }
 }
 
+// Extract benchmark short name (without size)
+#let get-bench-name(name) = {
+  name.replace("BM_", "").split("/").at(0)
+}
+
+// Prepare data for all results with version numbers
+// Group means by benchmark name (5 sizes per version)
+#let bench-names = means.map(m => get-bench-name(m.name)).dedup()
+#let num-versions = bench-names.len()
+
 // Prepare data for all results
-#let all-by-size = means.map(b => (
+#let all-by-size = means.enumerate().map(p => {
+  let i = p.at(0)
+  let b = p.at(1)
+  (
     name: b.name,
+    bench-name: get-bench-name(b.name),
+    version: calc.floor(i / 5) + 1,
     pixels: get-size-pixels(b.name),
     label: get-size-label(b.name),
     tp: b.bytes_per_second / 1e9,  // GiB/s
     cat: categorize(b.name)
-  )).filter(d => d.pixels != none).sorted(key: d => d.pixels)
+  )
+}).filter(d => d.pixels != none)
 
-// Group by category, then by size
-#let by-cat = (:) 
+// Group by version
+#let by-version = (:)
 #{
   for item in all-by-size {
-    let cat = item.cat
-    if cat not in by-cat {
-      by-cat.insert(cat, ())
+    let v = str(item.version)
+    if v not in by-version {
+      by-version.insert(v, (items: (), name: item.bench-name, cat: item.cat))
     }
-    by-cat.at(cat).push(item)
+    by-version.at(v).items.push(item)
   }
 }
 
 // Extract unique pixel sizes and sort
 #let unique-sizes = all-by-size.map(d => d.pixels).dedup().sorted()
+
+// Function to get size label
+#let size-label(sz) = {
+  if sz == 640 * 480 { $ 640 times 480$ }
+  else if sz == 1280 * 720 { $ 1280 times 720$ }
+  else if sz == 1920 * 1080 { $ 1920 times 1080$ }
+  else if sz == 3840 * 2160 { $ 3840 times 2160$ }
+  else if sz == 7680 * 4320 { $ 7680 times 4320$ }
+  else { str(sz) }
+}
+
 // Create sorted list of categories
 #let cat-order = ("CPU", "OpenMP", "MPI", "GPU")
-#let cats-present = cat-order.filter(c => c in by-cat)
 
-// === Plot 1: All Results ===
+// === Plot 1: All Results by Version ===
 #let plot1-series = ()
 #{
-  for cat in cats-present {
-    let cat-data = by-cat.at(cat).sorted(key: d => d.pixels)
-    let x-vals = unique-sizes.map(sz => 
-      cat-data.find(d => d.pixels == sz)
-    )
-    let y-vals = unique-sizes.map(sz => 
-      cat-data.find(d => d.pixels == sz)
-    )
-    plot1-series.push((
-      cat: cat,
-      y: y-vals
-    ))
+  for v in range(1, num-versions + 1) {
+    let v-str = str(v)
+    if v-str in by-version {
+      let v-data = by-version.at(v-str)
+      let items = v-data.items.sorted(key: d => d.pixels)
+      let y-vals = unique-sizes.map(sz => {
+        let item = items.find(d => d.pixels == sz)
+        if item != none { item.tp } else { float.nan }
+      })
+      plot1-series.push((
+        version: v,
+        name: v-data.name,
+        cat: v-data.cat,
+        y: y-vals
+      ))
+    }
   }
 }
 
 #let all-diagram = figure(
   lq.diagram(
+    cycle: lq.color.map.petroff10 + (rgb(25,25,25), rgb(200,200,200), rgb(255,211,0)),
     width: 100%,
-    height: 8cm,
-    xlabel: [Image Size],
-    ylabel: [Throughput (GiB/s)],
-    lq.xaxis(
-      ticks: unique-sizes.enumerate().map(p => (
-        p.at(0),
-        [#all-by-size.filter(d => d.pixels == p.at(1)).first().label]
-      )),
+    height: 10cm,
+    xlabel: [Rozmiar obrazu (piksele)],
+    ylabel: [Przepustowość (GiB/s)],
+    xscale: "log",
+    yscale: "log",
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: unique-sizes.map(sz => (sz, size-label(sz))),
       subticks: none,
     ),
-    lq.yaxis(),
+    legend: (position: right + top),
     ..plot1-series.map(s => lq.plot(
-      range(unique-sizes.len()),
+      unique-sizes,
       s.y,
-      mark: "circle",
-      stroke: 2pt,
-      label: [#s.cat]
+      mark: "o",
+      label: [v#s.version]
     ))
   ),
-  caption: [All benchmark results: Throughput vs. Image Size],
+  caption: [Wszystkie wyniki benchmarków],
 )
 
 // === Plot 2: Full Pipeline Results Only ===
 #let fp-data = all-by-size.filter(d => str.contains(d.name, "FullPipeline"))
-#let fp-by-cat = (:)
-for item in fp-data {
-  let cat = item.cat
-  if cat not in fp-by-cat {
-    fp-by-cat.insert(cat, ())
+
+// Group full pipeline by version
+#let fp-by-version = (:)
+#{
+  for item in fp-data {
+    let v = str(item.version)
+    if v not in fp-by-version {
+      fp-by-version.insert(v, (items: (), name: item.bench-name, cat: item.cat))
+    }
+    fp-by-version.at(v).items.push(item)
   }
-  fp-by-cat.at(cat).push(item)
 }
 
-#let fp-sizes = fp-data.map(d => d.pixels).sorted().dedup()
-#let fp-cats-present = cats-present.filter(c => c in fp-by-cat)
+#let fp-sizes = fp-data.map(d => d.pixels).dedup().sorted()
+#let fp-versions = fp-by-version.keys().map(int).sorted()
 
 #let plot2-series = ()
-for cat in fp-cats-present {
-  let cat-data = fp-by-cat.at(cat).sorted(by: d => d.pixels)
-  let y-vals = fp-sizes.map(sz =>
-    cat-data.find(d => d.pixels == sz) |> (d => if d != none { d.tp } else { 0 })
-  )
-  plot2-series.push((
-    cat: cat,
-    y: y-vals
-  ))
+#{
+  for v in fp-versions {
+    let v-str = str(v)
+    if v-str in fp-by-version {
+      let v-data = fp-by-version.at(v-str)
+      let items = v-data.items.sorted(key: d => d.pixels)
+      let y-vals = fp-sizes.map(sz => {
+        let item = items.find(d => d.pixels == sz)
+        if item != none { item.tp } else { float.nan }
+      })
+      plot2-series.push((
+        version: v,
+        name: v-data.name,
+        cat: v-data.cat,
+        y: y-vals
+      ))
+    }
+  }
 }
 
 #let full-diagram = figure(
   lq.diagram(
     width: 100%,
-    height: 8cm,
-    xlabel: [Image Size],
-    ylabel: [Throughput (GiB/s)],
-    lq.xaxis(
-      ticks: fp-sizes.enumerate().map(p => (
-        p.at(0),
-        [#fp-data.filter(d => d.pixels == p.at(1)).first().label]
-      )),
+    height: 10cm,
+    xlabel: [Rozmiar obrazu (piksele)],
+    ylabel: [Przepustowość (GiB/s)],
+    yscale: "log",
+    xscale: "log",
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: fp-sizes.map(sz => (sz, size-label(sz))),
       subticks: none,
     ),
+    legend: (position: right + top),
     ..plot2-series.map(s => lq.plot(
-      range(fp-sizes.len()),
+      fp-sizes,
       s.y,
-      mark: "square",
-      stroke: 2pt,
-      label: [#s.cat]
+      mark: "s",
+      label: [v#s.version (#s.cat)]
     ))
   ),
-  caption: [Full Pipeline benchmarks: Throughput vs. Image Size],
+  caption: [Pełny pipeline przetwarzania obrazu],
 )
 
 // === Plot 3: Best at 7680x4320 ===
@@ -161,39 +204,39 @@ for cat in fp-cats-present {
 #let big-results = all-by-size.filter(d => d.pixels == max-pixels)
 
 #let best-by-cat-7680 = (:)
-for item in big-results {
-  let cat = item.cat
-  if cat not in best-by-cat-7680 {
-    best-by-cat-7680.insert(cat, item)
-  } else if item.tp > best-by-cat-7680.at(cat).tp {
-    best-by-cat-7680.at(cat) = item
+#{
+  for item in big-results {
+    let cat = item.cat
+    if cat not in best-by-cat-7680 {
+      best-by-cat-7680.insert(cat, item)
+    } else if item.tp > best-by-cat-7680.at(cat).tp {
+      best-by-cat-7680.at(cat) = item
+    }
   }
 }
 
 #let bar-cats = ("CPU", "OpenMP", "MPI", "GPU").filter(c => c in best-by-cat-7680)
-#let bar-vals = bar-cats.map(c => best-by-cat-7680.at(c).tp)
-#let bar-labels = bar-cats.map(c => [#c])
+#let bar-vals = bar-cats.map(c => calc.ceil(best-by-cat-7680.at(c).tp))
 
 #let best-diagram = figure(
   lq.diagram(
     width: 100%,
     height: 6cm,
-    xlabel: [Implementation],
+    xlabel: [Implementacja],
     ylabel: [Throughput (GiB/s)],
-    lq.xaxis(
-      ticks: bar-cats.enumerate().map(p => (
-        p.at(0),
-        [#p.at(1)]
-      )),
+    yscale: "log",
+    
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: bar-cats.enumerate().map(p => (p.at(0), p.at(1))),
       subticks: none,
     ),
     lq.bar(
       range(bar-cats.len()),
       bar-vals,
-      fill: lq.cycle,
       width: 0.6,
-      label: none
+      base: 0.01,
     )
   ),
-  caption: [Best results at 7680×4320: CPU vs OpenMP vs MPI vs GPU],
+  caption: [Najlepsze wyniki dla obrazu $7680 times 4320$ pikselu],
 )
