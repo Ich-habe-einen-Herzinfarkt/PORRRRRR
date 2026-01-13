@@ -77,6 +77,93 @@ ImageF convolve(const ImageF &in, int w, int h,
 
 Mimo tego, przez możliwość zrównoleglenia, nastąpiła niewielka zmiana w implementacji pełnego algorytmu - wydzieliliśmy funkcję `magnitude` do obliczania wielkości gradientu, umożliwiając zrównoleglenie jej wewnętrznej pętli.
 
+
+== MPI
+
+Message Passing Interface (MPI) to standard definiujący API do przekazywania wiadomości między procesami tworzony przez MPI Forum. W praktyce jest to więc rozwiązanie niższego poziomu w porównaniu do np. OpenMP, wymagające manualnego uruchamiania procesów bez prostych abstrakcji pozwalających np. na zrównoleglenie pętli przez dodanie jednej dyrektywy `#pragma parallel for`.
+
+Model działania MPI jest także znacząco inny niż OpenMP, nie polegając na współdzielonej pamięci, co umożliwia rozdzielenie pracy na wiele osobnych systemów. Niestety nie odbywa się to bez kosztów i poza zwiększonym skomplikowaniem API, przekazywanie wiadomości ma większy narzut wydajnościowy w porównaniu do dostępów do tej samej pamięci.
+
+Konsekwentnie, możemy zauważyć bardziej znaczące różnice w konstrukcji programu korzystającego z MPI w porównaniu do wersji sekwencyjnej i korzystającej z OpenMP. W naszym wypadku same wykonywane kroki algorytmu nie różnią się znacząco, natomiast nastąpiła duża zmiana w sposobie ich wywoływania: wersja w MPI dzieli obraz na wiele części z użyciem metody MPI `Scatterv` i synchronizuje je między procesami -- każdy proces dostaje więc swój mały obraz na którym może pracować, a na końcu są one łączone w jedną całość z użyciem `Gatherv`.
+
+Dodatkowo procesy w obliczeniach korzystają z wierszy obrazu, które należą do innych procesów, co skutuje potrzebą wysłania odpowiednio pierwszego i ostatniego wiersza danego fragmentu do "sąsiednich" procesów. Obsłużenie przekazywania sobie informacji między procesami powoduje kolejne opóźnienia.
+
+Choć koncepcyjnie tego typu podejście jest dość proste -- i ma zaletę względem choćby OpenMP w formie pełnej kontroli nad tym jaki proces ma dostęp do jakich danych -- możemy zauważyć, że wymaga ono znacząco więcej kodu.
+
+#todo[Jakieś jeszcze szczegóły techniczne? ~K: Done! Dopisałam jeden akapit. To nudny kod, dużo się tam nie dzieje tbh :/]
+
+#figure(
+  ```cpp
+// Boradcast metadata
+MPI_Bcast(&width, 1, MPI_INT, 0, MPI_COMM_WORLD);
+MPI_Bcast(&height, 1, MPI_INT, 0, MPI_COMM_WORLD);
+MPI_Bcast(&channels, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+// Distribute work across processes
+int rows_per_process = height / num_processes;
+int remainder = height % num_processes;
+int start_row = rank * rows_per_process + std::min(rank, remainder);
+int end_row = start_row + rows_per_process + (rank < remainder ? 1 : 0);
+int local_height = end_row - start_row;
+
+// Send loaded image to other processes so they don't need to load them themselves
+std::vector<int> sendcounts;
+std::vector<int> displs;
+
+if (rank == 0) {
+    sendcounts.resize(num_processes);
+    displs.resize(num_processes);
+
+    int current_disp = 0;
+    for (int r = 0; r < num_processes; r++) {
+        int r_start = r * rows_per_process + std::min(r, remainder);
+        int r_end = r_start + rows_per_process + (r < remainder ? 1 : 0);
+        int r_h = r_end - r_start;
+
+        sendcounts[r] = r_h * width * channels; // Note: Bytes, not pixels!
+        displs[r] = current_disp;
+        current_disp += sendcounts[r];
+    }
+}
+
+// Receive the image
+std::vector<uint8_t> local_data(width * local_height * channels);
+
+MPI_Scatterv(
+    data, sendcounts.data(), displs.data(), MPI_UNSIGNED_CHAR, // Send params
+    local_data.data(), local_height * width * channels, MPI_UNSIGNED_CHAR, // Recv params
+    0, MPI_COMM_WORLD // Root and Comm
+);
+  ```, caption: [Rozdzielenie obrazu między procesy z użyciem MPI_Scatterv]
+)
+
+#figure(
+  ```cpp
+// Gather results
+ImageF final_result;
+if (rank == 0) final_result.resize(width * height);
+
+std::vector<int> recvcounts(num_processes);
+std::vector<int> displs_v2(num_processes);
+if (rank == 0) {
+    int current_disp = 0;
+    for (int r = 0; r < num_processes; r++) {
+        // Re-calculate the layout logic for other ranks
+        int r_start = r * rows_per_process + std::min(r, remainder);
+        int r_end = r_start + rows_per_process + (r < remainder ? 1 : 0);
+        int r_height = r_end - r_start;
+
+        recvcounts[r] = r_height * width;
+        displs_v2[r] = current_disp;
+        current_disp += recvcounts[r];
+    }
+}
+
+MPI_Gatherv(output.data(), local_height * width, MPI_FLOAT, final_result.data(), recvcounts.data(), displs_v2.data(), MPI_FLOAT, 0, MPI_COMM_WORLD);
+
+  ```, caption: [Zbieranie wyników do jednego obrazu]
+)
+
 == GPU (SYCL)
 Do zaimplementowania operatora Sobela na karcie graficznej wykorzystaliśmy `SYCL` --  osadzony w `C++` język do programowania heterogennego, skupiony na programowaniu `GPU` (choć z założenia ma wspierać też inne akceleratory, np. `FPGA`), utrzymywanym przez grupę Khronos. Koncepcyjnie jest inspirowany modelem `CUDA` i `HIP`, zapewniając podobne doświadczenie developerskie pisania kodu dzielonego z `C++` na hoście, używając abstrakcji na wyższym poziomie niż `Vulkan` czy `OpenCL`. Cała implementacja znajduje się w pliku `main.cpp` -- poza benchmarkiem, który został wydzielony do pliku `bench.cpp` i zawiera dodatkowe implementacje testowane w czasie prac nad ostateczną wersją.
 
@@ -134,7 +221,7 @@ Typowo kernele implementowane są jako anonimowe wyrażenia lambda, do których 
   ```, caption: [Implementacja konwolucji w SYCL]
 )<sycl-conv>
 
-Poza realizacją głównej pętli jako dodanie mapującego kernela do kolejki przez `queue.parallel_for`, możemy na @sycl-conv[Programie] zauważyć znaczącą różnicę w implementacji: częściowo jest to unrolling pętli,co może pozytywnie wpłynąć także na wersję na CPU#footnote[dla kompletności wersja sekwencyjna konwolucji z tą implementacją została dodana do benchmarku], ale co ważniejsze zmiana ta pozwala każdemu z naszych rdzeni GPU pracować nad tylko małą częścią problemu (2 pikselami - wartość znaleziona eksperymentalnie) z użyciem relatywnie prostych operacji. Pozwala to znacznie lepiej wykorzystać masywną liczbę rdzeni dostępną na procesorze graficznym niż gdybyśmy portowali wersję na CPU w bardziej naiwny sposób.
+Poza realizacją głównej pętli jako dodanie mapującego kernela do kolejki przez `queue.parallel_for`, możemy na @sycl-conv[Programie] zauważyć znaczącą różnicę w implementacji: częściowo jest to unrolling pętli,co może pozytywnie wpłynąć także na wersję na CPU#footnote[dla kompletności wersja sekwencyjna konwolucji z tą implementacją została dodana do benchmarku], ale co ważniejsze zmiana ta pozwala każdemu z naszych rdzeni GPU pracować nad tylko małą częścią problemu (2 pikselami#footnote[Wartość 2 pikseli została znaleziona eksperymentalnie i jest specyficzna do używanego sprzętu. Bardzo możliwe, że inne architektury GPU -- w szczególności Nvidii -- lepiej sprawdzą się z inną konfiguracją rozmiaru grup i ilości pracy na grupę.]) z użyciem relatywnie prostych operacji. Pozwala to znacznie lepiej wykorzystać masywną liczbę rdzeni dostępną na procesorze graficznym niż gdybyśmy portowali wersję na CPU w bardziej naiwny sposób.
 
 Prawdopodobnie nie jest to też optymalna implementacja#footnote[Warto też wspomnieć, że prawdopodobnie możliwe by było także wykorzystanie wbudowanych w kartę graficzną prymitywów i potencjalnie hardware'u dedykowanego do pracy z obrazami. W ramach pracy zignorowaliśmy bowiem graficzną naturę zadania, przyjmując za cel zbadanie ogólnego przypadku.] -- bardziej zaawansowanym podejściem do optymalizacji na GPU jest "kafelkowanie", gdzie grupuje się rdzenie w "kafelki" które najpierw ładują fragmenty całego zadania (tutaj nawet obrazu) do lokalnej dla grupy pamięci, a później pracują na niej bez konieczności wolnych dostępów do globalnych dla kernela danych.
 

@@ -1,12 +1,13 @@
 #{
-  import "@local/wut-thesis:0.1.10": simple-doc, wut-thesis, acknowledgements, figure-outline, table-outline, appendix
+  import "@local/wut-thesis:0.1.11": simple-doc, wut-thesis, acknowledgements, figure-outline, table-outline, appendix
   import "utils.typ": flex-caption-styles, todo, glossary-outline
-  import "glossary.typ": glossary
   import "@preview/glossarium:0.5.8": make-glossary, register-glossary
   import "@preview/drafting:0.2.2": note-outline, set-margin-note-defaults
+  import "@preview/codly:1.3.0": *
+  import "@preview/codly-languages:0.1.1": *
 
-  show: make-glossary
-  register-glossary(glossary)
+  show: codly-init.with()
+
   show: flex-caption-styles
   /** Drafting
 
@@ -33,6 +34,8 @@
     instructor: "dr. Mateusz Koryciński",
     date: datetime.today(),
     lang: "pl",
+    font: "Source Sans Pro",
+    title-font: "Adagio_Slab",
     show-toc: true,
     show-figures: true,
     draft: true, // Set to false for final version
@@ -40,10 +43,8 @@
   )
 
   // --- Custom Settings ---
-  // if you want to override any settings from the template here is the place to do so,
-  // e.g.:
-  // set text(font: "Comic Sans MS")
-
+  // if you want to override any settings from the template here is the place to do so
+  show heading: text.with(font: "Source Serif Pro")
 
   // --- Main Chapters ---
   include "content/Introduction.typ"
@@ -54,9 +55,6 @@
   
   // --- Bibliography ---
   bibliography("bibliography.bib", style: "ieee")
-
-  // List of Acronyms - comment out, if not needed (no abbreviations were used).
-  glossary-outline(glossary)
 
   // List of figures - comment out, if not needed.
   figure-outline()
