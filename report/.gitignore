@@ -1,0 +1,4 @@
+fonts/*.ttf
+fonts/*.otf
+*.pdf
+-main.pdf
