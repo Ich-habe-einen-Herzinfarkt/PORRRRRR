@@ -115,7 +115,7 @@
   lq.diagram(
     cycle: lq.color.map.petroff10 + (rgb(25,25,25),rgb(255,211,0),  rgb(0,50,120), ),
     width: 100%,
-    height: 10cm,
+    height: 9.5cm,
     xlabel: [Rozmiar obrazu (piksele)],
     ylabel: [Przepustowość (GiB/s), logarytmiczna],
     xscale: "log",
@@ -175,6 +175,27 @@
   }
 }
 
+#let plot2-series-speedup = ()
+#{
+  for v in fp-versions {
+    let v-str = str(v)
+    if v-str in fp-by-version {
+      let v-data = fp-by-version.at(v-str)
+      let items = v-data.items.sorted(key: d => d.pixels)
+      let y-vals = fp-sizes.map(sz => {
+        let item = items.find(d => d.pixels == sz)
+        if item != none { item.tp / by-version.at("1").items.find(d => d.pixels == sz).tp } else { float.nan }
+      })
+      plot2-series-speedup.push((
+        version: v,
+        name: v-data.name,
+        cat: v-data.cat,
+        y: y-vals
+      ))
+    }
+  }
+}
+
 #let full-diagram = figure(
   lq.diagram(
     width: 100%,
@@ -201,6 +222,34 @@
   ),
   caption: [Pełny pipeline przetwarzania obrazu],
 )
+
+#let full-diagram-speedup = figure(
+  lq.diagram(
+    width: 100%,
+    height: 10cm,
+    xlabel: [Rozmiar obrazu (piksele)],
+    ylabel: [Przyspieszenie],
+    xscale: "log",
+    yscale: "log",
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: fp-sizes.map(sz => (sz, size-label(sz))),
+      subticks: none,
+    ),
+    yaxis: (
+      tick-args: (density: 200%)
+    ),
+    legend: (position: right + top),
+    ..plot2-series-speedup.map(s => lq.plot(
+      fp-sizes,
+      s.y,
+      mark: "s",
+      label: [v#s.version (#s.cat)]
+    ))
+  ),
+  caption: [Pełny pipeline przetwarzania obrazu],
+)
+
 
 #let plot3-series = plot2-series.filter(t => t.cat != "GPU")
 #let full-diagram-no-gpu = figure(
@@ -229,6 +278,35 @@
   ),
   caption: [Pełny pipeline przetwarzania obrazu (bez GPU)],
 )
+
+#let plot3-series-speedup = plot2-series-speedup.filter(t => t.cat != "GPU")
+#let full-diagram-no-gpu-speedup = figure(
+  lq.diagram(
+    width: 100%,
+    height: 10cm,
+    xlabel: [Rozmiar obrazu (piksele)],
+    ylabel: [Przyspieszenie],
+    // yscale: "log",
+    xscale: "log",
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: fp-sizes.map(sz => (sz, size-label(sz))),
+      subticks: none,
+    ),
+    yaxis: (
+      tick-args: (density: 100%)
+    ),
+    legend: (position: right + top),
+    ..plot3-series-speedup.map(s => lq.plot(
+      fp-sizes,
+      s.y,
+      mark: "s",
+      label: [v#s.version (#s.cat)]
+    ))
+  ),
+  caption: [Pełny pipeline przetwarzania obrazu (bez GPU)],
+)
+
 // === Plot 3: Best at 7680x4320 ===
 #let max-pixels = 7680 * 4320
 #let big-results = all-by-size.filter(d => d.pixels == max-pixels)
@@ -264,6 +342,42 @@
     lq.bar(
       range(bar-cats.len()),
       bar-vals,
+      width: 0.6,
+      base: 0.01,
+    )
+  ),
+  caption: [Najlepsze wyniki dla obrazu $7680 times 4320$ pikseli],
+)
+
+#let best-by-cat-7680-base = (:)
+#{
+  for item in big-results {
+    let cat = item.cat
+    if cat not in best-by-cat-7680-base {
+      best-by-cat-7680-base.insert(cat, item)
+    } else if item.tp > best-by-cat-7680-base.at(cat).tp and not item.name.contains("CPU_Unrolled") {
+      best-by-cat-7680-base.at(cat) = item
+    }
+  }
+}
+#let bar-vals-base = bar-cats.map(c => calc.ceil(best-by-cat-7680-base.at(c).tp))
+
+#let best-diagram-base = figure(
+  lq.diagram(
+    width: 100%,
+    height: 6cm,
+    xlabel: [Implementacja],
+    ylabel: [Przepustowość (GiB/s, logarytmiczna)],
+    yscale: "log",
+    
+    ylim: (0.1, auto),
+    xaxis: (
+      ticks: bar-cats.enumerate().map(p => (p.at(0), p.at(1))),
+      subticks: none,
+    ),
+    lq.bar(
+      range(bar-cats.len()),
+      bar-vals-base,
       width: 0.6,
       base: 0.01,
     )
