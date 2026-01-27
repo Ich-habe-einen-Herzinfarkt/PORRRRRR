@@ -182,13 +182,37 @@ ImageF convolve(const ImageF &in, int w, int h,
   - Minimalna ingerencja w kod - wystarczy dodać jedną dryrektywę `#pragma`.
   - Rozdzielenie pętli – pętla po pikselach (`for (int i = 0; i < w*h; ++i)`) jest podzielona między wątki.
   - Statyczny podział – `schedule(static)` zapewnia równomierny podział iteracji, co jest korzystne przy stałym koszcie obliczeniowym per piksel.
-  - Współdzielone zasoby – obrazy wejściowy i wyjściowy, rozmiary oraz kernel są przekazywane jako `shared`, co eliminuje niepotrzebne kopiowanie.
-  
-  
-  
+  - Współdzielone zasoby – obrazy wejściowy i wyjściowy, rozmiary oraz kernel są przekazywane jako `shared`, co eliminuje niepotrzebne kopiowanie.  
 
 ]
-
+#slide[
+  #set text(size: 12pt)
+  #figure(```cpp
+ImageF convolve(const ImageF &in, int w, int h,
+                const std::vector<float> &kernel, int kw, int kh) {
+  ImageF out(w * h, 0.0f);
+  int padX = kw / 2, padY = kh / 2;
+  
+  #pragma omp parallel for schedule(static) default(none) shared(in, out, w, h, kernel, kw, kh, padX, padY)
+      for (int i = 0; i < w * h; ++i) {
+          int x = i % w;
+          int y = i / w;
+          float sum = 0.0f;
+          for (int ky = 0; ky < kh; ++ky) {
+              for (int kx = 0; kx < kw; ++kx) {
+                  int ix = x + kx - padX;
+                  int iy = y + ky - padY;
+                  if (ix >= 0 && ix < w && iy >= 0 && iy < h) {
+                      sum += in[idx(ix, iy, w)] * kernel[ky * kw + kx];
+                  }
+              }
+          }
+          out[i] = sum;
+      }
+      return out;
+  }
+  ```)
+]
 == MPI -- przyspieszenie #mpi-speedup$times$
 
 #slide[
@@ -240,7 +264,47 @@ MPI_Gatherv(output.data(), local_height * width, MPI_FLOAT,
     - w praktyce moje podejścia się nie udały i były wolniejsze niż wersja finalna
 ]
 
-== Alternatywne wersje w SYCL...
+== Końcowa wersja SYCL
+#slide[
+  #set text(size: 14pt)
+  #columns(2)[
+```cpp
+queue.parallel_for<sobel_kernel>(
+      sycl::nd_range<2>(
+          sycl::range<2>(globalY, globalX),
+          sycl::range<2>(WG_Y, WG_X)
+      ),
+      [=](sycl::nd_item<2> item) {
+          int y = item.get_global_id(0);
+          int x0 = item.get_global_id(1) * 2;
+          if (y >= h) return;
+          #pragma unroll
+          for (int dx = 0; dx < PIXELS_PER_WI; ++dx) {
+              int x = x0 + dx;
+              if (x >= w) continue;
+              if (x > 0 && y > 0 && x < w - 1 && y < h - 1) {
+                  float p00 = gray[(y-1) * w + (x-1)];
+                  float p01 = gray[(y-1) * w + x];
+                  float p02 = gray[(y-1) * w + (x+1)];
+                  float p10 = gray[y * w + (x-1)];
+                  float p12 = gray[y * w + (x+1)];
+                  float p20 = gray[(y+1) * w + (x-1)];
+                  float p21 = gray[(y+1) * w + x];
+                  float p22 = gray[(y+1) * w + (x+1)];
+
+                  float gx = -p00 + p02 - 2.0f * p10 + 2.0f * p12 - p20 + p22;
+                  float gy = -p00 - 2.0f * p01 - p02 + p20 + 2.0f * p21 + p22;
+
+                  mag[y * w + x] = sycl::native::sqrt(gx * gx + gy * gy);
+              } else {
+                  mag[y * w + x] = 0.0f;
+              }
+          }
+      }
+  );
+```
+  ]
+]
 
 
 
@@ -339,11 +403,11 @@ MPI_Gatherv(output.data(), local_height * width, MPI_FLOAT,
   #pause
   - Zoptymalizowana wersja sekwencyjna *jest szybsza niż naiwne wersje równoległe*
   #pause
-  - Optymalizacja algorytmu ważniejsza niż ślepe zrównoleglenie
+  - Optymalizacja algorytmu potrafi być ważniejsza niż zrównoleglenie
   #pause
-  - MPI (#mpi-speedup$times$) > OpenMP (#openmp-speedup$times$) dla tego problemu
+  - MPI (#mpi-speedup$times$) > OpenMP (#openmp-speedup$times$) dla tego problemu i implementacji
   #pause
-  - Naiwne kafelkowanie (tiling) nie pomogło
+  - Naiwne kafelkowanie (tiling) na GPU nie pomogło
 ]
 
 = Wnioski
@@ -367,7 +431,7 @@ MPI_Gatherv(output.data(), local_height * width, MPI_FLOAT,
   #v(1em)
 ]
 
-= Pytania?
+= Pytania
 
 #focus-slide[
   #set text(size: 40pt)
